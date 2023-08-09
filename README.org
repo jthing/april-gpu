@@ -1,0 +1,16 @@
+#+title:      Run April on GPU
+#+date:       <2023-08-09 on.>
+#+author:     John Thingstad <jpthing@online.no>
+##+OPTIONS: author:nil
+
+* Run April on GPU
+
+This is a work in progress. For a sitrep see the
+(April GPU blog)[https://jthing.github.io/april-hugo/] 
+
+# Local Variables:
+# eval: (set-fill-column 90)
+# eval: (auto-fill-mode t)
+# End:
+
+#  LocalWords:  sitrep
