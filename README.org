@@ -4,7 +4,7 @@
 #+OPTIONS:   author:nil
 
 This is a work in progress. For a sitrep see the
-(April GPU blog)[https://jthing.github.io/april-hugo/] 
+[April GPU blog](https://jthing.github.io/april-hugo/)
 
 # Local Variables:
 # eval: (set-fill-column 90)
