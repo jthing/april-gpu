@@ -6,6 +6,6 @@
   :license  "Apache Licence 2.0"
   :version "0.0.1"
   :serial t
-  :depends-on (#:vk #:vgplot #:lparallel #:april)
+  :depends-on (#:vk #:access #:iterate #:cl-ppcre #:yason #:april)
   :components ((:file "package")
                (:file "april-gpu")))
