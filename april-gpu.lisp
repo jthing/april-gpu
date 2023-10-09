@@ -59,8 +59,8 @@
 ;; Global constants
 ;;--------------------------------------------------
 
-(defparameter *debug-pipeline* t)
-(defparameter *step* t)
+(defvar *debug-pipeline* t)
+(defvar *step* t)
 
 (defvar *application-name* "April GPU")
 (defvar *application-version* (list 1 0 0))
@@ -114,11 +114,11 @@
 
 (defclass compute-pipeline-info ()
   ((a-shader :initarg :shader
-	   :accessor cpi-shader)
+	     :accessor cpi-shader)
    (a-input  :initarg :input
-	   :accessor cpi-input)
+	     :accessor cpi-input)
    (a-output :initarg :output
-	   :accessor cpi-output)))
+	     :accessor cpi-output)))
 
 (defun make-compute-pipeline-info (&key shader input output)
   (make-instance 'compute-pipeline-info :shader shader :input input :output output))
@@ -134,12 +134,24 @@
    (device
     :initform nil
     :accessor csi-device)
+   (physical-device
+    :initform nil
+    :accessor csi-physical-device)
+   (vk:memory-type-index
+    :initform nil
+    :accessor csi-memory-type-index)
    (input-buffer
     :initform nil
     :accessor csi-input-buffer)
    (output-buffer
     :initform nil
-    :accessor csi-output-buffer)))
+    :accessor csi-output-buffer)
+   (in-buffer-memory
+    :initform nil
+    :accessor csi-in-buffer-memory)
+   (out-buffer-memory
+    :initform nil
+    :accessor csi-out-buffer-memory)))
 
 (defun make-compute-shader-info ()
   (make-instance 'compute-shader-info))
@@ -161,28 +173,132 @@
 ;; do-pipeline-layout
 ;; do-descriptor-set-layout
 ;; do-read-shader-&-Create-shader-module
-;; do-bind-buffers-to-memory
-;; do-write-data-to-memory
-;; do-allocate-memory
-;; do-query-memory-types
+
+(defun do-bind-buffers-to-memory (shader-info compute-shader-info)
+  (declare (ignorable compute-shader-info))
+  (let*((my-in-result
+	  (vk:bind-buffer-memory
+	   (csi-device shader-info)
+	   (csi-input-buffer shader-info)
+	   (csi-in-buffer-memory shader-info)
+	   0))
+	(my-out-result
+	  (vk:bind-buffer-memory
+	   (csi-device shader-info)
+	   (csi-output-buffer shader-info)
+	   (csi-out-buffer-memory shader-info)
+	   0)))
+    (unless (and (eql my-in-result :success) (eql my-out-result :success))
+      (error (make-condition 'error-bind-buffers-to-memory)))))
+
+(defun do-write-data-to-memory (shader-info compute-shader-info)
+  ;; map-memory writes data from device to host memory
+  (let ((my-result
+	   (vk:map-memory (csi-device shader-info)
+			  (csi-in-buffer-memory shader-info)
+			  0
+			  (* (length (cpi-input compute-shader-info)) (cffi:foreign-type-size :float))
+			  (csi-in-buffer-memory shader-info)))
+	(c-array (csi-in-buffer-memory shader-info))
+	(lisp-array (cpi-input compute-shader-info)))
+
+    (unless (eql my-result :success)
+      (error (make-condition 'error-write-data-to-memory)))
+
+    ;; move lisp array elements into the c allocated memory making sure the type and alignment hold
+    (loop for i from 0 to (length lisp-array) do
+      (setf (cffi:mem-aref c-array :float i) (cffi:convert-to-foreign (aref lisp-array i) :float)))
+
+    ;; unmap-memory maps memory from host memory to device
+    (let ((my-out-result (vk:unmap-memory
+			  (csi-device shader-info)
+			  (csi-in-buffer-memory shader-info))))
+
+      (unless (eql my-out-result :success)
+	(error (make-condition 'error-write-data-to-memory)))
+
+      (do-bind-buffers-to-memory shader-info compute-shader-info))))
+
+(defun do-allocate-memory (shader-info compute-shader-info)  
+  (let* ((my-in-buffer-memory-requirements
+	   (vk:get-buffer-memory-requirements
+	    (csi-device shader-info)
+	    (csi-input-buffer shader-info)))
+	 (my-out-buffer-memory-requirements
+	   (vk:get-buffer-memory-requirements
+	    (csi-device shader-info)
+	    (csi-output-buffer shader-info)))
+	 (my-in-buffer-allocate-info
+	   (vk:make-memory-allocate-info
+	    :allocation-size (vk:size my-in-buffer-memory-requirements)
+	    :memory-type-index (csi-memory-type-index shader-info)))
+	 (my-out-buffer-allocate-info
+	   (vk:make-memory-allocate-info
+	    :allocation-size (vk:size my-out-buffer-memory-requirements)
+	    :memory-type-index (csi-memory-type-index shader-info))))
+    (multiple-value-bind (my-in-buffer-memory in-status)
+	(vk:allocate-memory (csi-device shader-info) my-in-buffer-allocate-info)
+      (multiple-value-bind (my-out-buffer-memory out-status)
+	  (vk:allocate-memory (csi-device shader-info) my-out-buffer-allocate-info)
+	(when *debug-pipeline*
+	  (print my-in-buffer-allocate-info)
+	  (print my-out-buffer-allocate-info)
+	  (print in-status)
+          (print my-in-buffer-memory)
+          (print out-status)
+          (print my-out-buffer-memory)
+	  (when *step* (break)))
+	(unless (or (eql in-status :success) (eql my-out-buffer-memory :success))
+	  (error (make-condition 'error-allocate-memory)))
+        (setf (csi-in-buffer-memory shader-info) my-in-buffer-memory)
+        (setf (csi-out-buffer-memory shader-info) my-out-buffer-memory)))
+    (do-write-data-to-memory shader-info compute-shader-info)))
+
+(defun do-query-memory-types (shader-info compute-shader-info)
+  (let* ((my-device (csi-physical-device shader-info))
+	 (my-memory-properties (vk:get-physical-device-memory-properties my-device))
+	 (my-memory-types (vk:memory-types my-memory-properties))
+	 (my-memory-index
+	   (position-if
+	    (lambda (my-memory-type)
+	      (let ((my-propery-flags (vk:property-flags my-memory-type)))
+		(and (not (null my-propery-flags))
+		     (member :host-visible my-propery-flags)
+		     (member :host-coherent my-propery-flags))))
+	    my-memory-types)))
+    (when *debug-pipeline*
+      (print my-memory-index)
+      (print (elt my-memory-types my-memory-index))
+      (when *step* (break)))
+    (setf (csi-memory-type-index shader-info) my-memory-index))
+  (do-allocate-memory shader-info compute-shader-info))
 
 (defun do-create-buffers (shader-info compute-pipeline-info)
-  (declare (ignore compute-pipeline-info))
-  (let ((my-buffer-create-info
+  (let ((my-input-buffer-create-info
 	  (vk:make-buffer-create-info
-	   :size 80
-	   :usage :vertex-buffer
+	   :size (* (length (cpi-input compute-pipeline-info)) (cffi:foreign-type-size :float))
+	   :usage :storage-buffer
+	   :sharing-mode :exclusive
+	   :queue-family-indices (list 1)))
+	(my-output-buffer-create-info
+	  (vk:make-buffer-create-info
+	   :size (* (length (cpi-output compute-pipeline-info)) (cffi:foreign-type-size :float)) ; ieee754: 4 bytes to a float
+	   :usage :storage-buffer
 	   :sharing-mode :exclusive
 	   :queue-family-indices (list 1))))
-    (let ((input-buffer (vk:create-buffer (csi-device shader-info) my-buffer-create-info))
-	  (output-buffer (vk:create-buffer (csi-device shader-info) my-buffer-create-info)))
+    (let ((input-buffer (vk:create-buffer (csi-device shader-info) my-input-buffer-create-info))
+	  (output-buffer (vk:create-buffer (csi-device shader-info) my-output-buffer-create-info)))
       (unless (and input-buffer output-buffer)
 	(error (make-condition 'error-create-buffers)))
       (when *debug-pipeline*
-	(print my-buffer-create-info)
+	(print "Input")
+	(print my-input-buffer-create-info)
+	(print "Output")
+	(print my-output-buffer-create-info)
 	(when *step* (break)))
       (setf (csi-input-buffer shader-info) input-buffer)
-      (setf (csi-output-buffer shader-info) output-buffer))))
+      (setf (csi-output-buffer shader-info) output-buffer)))
+  (do-query-memory-types shader-info compute-pipeline-info))
 
 (defun do-create-physical-device (shader-info compute-pipeline-info)
   (let* ((my-physical-device (first (vk:enumerate-physical-devices (csi-instance shader-info))))
@@ -207,6 +323,7 @@
 	(when *step* (break)))
       (unless (eql status :success)
 	(error (make-condition 'error-create-device)))
+      (setf (csi-physical-device shader-info) my-physical-device)
       (setf (csi-device shader-info) my-device)
       (do-create-buffers shader-info compute-pipeline-info))))
 
@@ -235,17 +352,26 @@
 The input and output arrays are set in compute-pipeline-info.
 Returns compute-shader-info (NB! not compute-pipeline-info)."
   (let ((shader-info (make-compute-shader-info)))
-    (handler-case (do-create-instance shader-info compute-pipeline-info)
-      (error-compute-pipeline (e)
-	(format *error-output* "create-compute-pipeline: ~S" (class-name e))
-	(cleanup-compute-pipeline shader-info)
-	(return-from create-compute-pipeline (values nil :failure))))
-    (values shader-info :success)))
+    (unwind-protect 
+	 (do-create-instance shader-info compute-pipeline-info)
+      (cleanup-compute-pipeline shader-info))))
 
 (defun cleanup-compute-pipeline (compute-shader-info)
   (let ((info compute-shader-info))
     ;; info could still be alive when this returns. Remeber the repl * ** and ***
     ;; Therefore set the destroyed objects to nil
+    (when (csi-in-buffer-memory info)
+      (vk:free-memory (csi-device info) (csi-in-buffer-memory info))
+      (setf (csi-in-buffer-memory info) nil))
+    (when (csi-out-buffer-memory info)
+      (vk:free-memory (csi-device info) (csi-out-buffer-memory info))
+      (setf (csi-out-buffer-memory info) nil))
+    (when (csi-output-buffer info)
+      (vk:destroy-buffer (csi-device info) (csi-output-buffer info))
+      (setf (csi-output-buffer info) nil))
+    (when (csi-input-buffer info)
+      (vk:destroy-buffer (csi-device info) (csi-input-buffer info))
+      (setf (csi-input-buffer info) nil))
     (when (csi-device info)
       (vk:destroy-device (csi-device info))
       (setf (csi-device info) nil))
@@ -255,15 +381,15 @@ Returns compute-shader-info (NB! not compute-pipeline-info)."
 
 (defun test-compute-pipeline ()
   (let* ((my-input-vector
-	   (make-array 10 :element-type 'fixnum
+	   (make-array 10 :element-type 'float
 			  :initial-contents
-			  (loop for i from 1 to 10 collecting i)))
+			  (loop for i from 1 to 10 collecting (float i))))
 	 (my-output-vector
-	   (make-array 10 :element-type 'fixnum :initial-element 0))
+	   (make-array 10 :element-type 'float :initial-element .0f0))
 	 (my-cpu-vector
-	   (make-array 10 :element-type 'fixnum
+	   (make-array 10 :element-type 'float
 			  :initial-contents
-			  (loop for i from 1 to 10 collecting (* i i))))
+			  (loop for i from 1 to 10 collecting (float (* i i)))))
 	 (my-shader-path "./shaders/")
 	 (my-shader-file "square.comp.spv")
 	 (my-shader-object
@@ -273,15 +399,14 @@ Returns compute-shader-info (NB! not compute-pipeline-info)."
 	   (make-compute-pipeline-info
 	    :shader my-shader-object
 	    :input my-input-vector
-	    :output my-output-vector))
-	 (my-compute-pipeline (create-compute-pipeline my-compute-pipeline-info)))
-    (format t "Input:         ~{~a~^, ~}~%" (coerce (cpi-input  my-compute-pipeline-info) 'list))
+	    :output my-output-vector)))
+    (create-compute-pipeline my-compute-pipeline-info)
+    (format t "~&Input:         ~{~a~^, ~}~%" (coerce (cpi-input  my-compute-pipeline-info) 'list))
     (format t "Output shader: ~{~a~^, ~}~%" (coerce (cpi-output my-compute-pipeline-info) 'list))
     (format t "Reference CPU: ~{~a~^, ~}~%" (coerce my-cpu-vector 'list))
     (if (equalp (cpi-output my-compute-pipeline-info) my-cpu-vector)
 	(format t "Correlation: OK.~%")
-	(format t "Correlation: FAIL!~%"))
-    (cleanup-compute-pipeline my-compute-pipeline)))
+	(format t "Correlation: FAIL!~%"))))
 
 ;; (with-instance (my-instance)
 ;; 	(with-device (my-device)
