@@ -191,33 +191,45 @@
     (unless (and (eql my-in-result :success) (eql my-out-result :success))
       (error (make-condition 'error-bind-buffers-to-memory)))))
 
+(defmacro with-mapped-memory ((p-data device memory offset size) &body body)
+  `(cffi:with-foreign-object (,p-data :pointer)
+     (vk:map-memory ,device ,memory ,offset ,size ,p-data)
+     (unwind-protect
+          (progn ,@body)
+       (vk:unmap-memory ,device ,memory))))
+
+(defun copy-to-device (device memory data data-type &optional (offset 0))
+  "Copies data to device memory.
+DEVICE - a VkDevice handle
+MEMORY - a VkDeviceMemory handle
+DATA - lisp data to copy
+DATA-TYPE - a foreign CFFI type corresponding to DATA's type."
+  (let* ((data-count (cond
+                       ((listp data) (length data))
+                       ((arrayp data) (array-total-size data))
+                       (t 1)))
+         (data-size (* (cffi:foreign-type-size data-type) data-count)))
+    (with-mapped-memory (p-mapped device memory offset data-size)
+      (cffi:with-foreign-object (p-data data-type data-count)
+        (dotimes (i data-count)
+          (setf (cffi:mem-aref p-data data-type i)
+                (cond
+                  ((arrayp data) (aref data i))
+                  ((listp data) (nth i data))
+                  (t data))))
+        (vk-utils:memcpy (cffi:mem-aref p-mapped :pointer)
+                         p-data
+                         data-size)))))
+
 (defun do-write-data-to-memory (shader-info compute-shader-info)
   ;; map-memory writes data from device to host memory
-  (let ((my-result
-	   (vk:map-memory (csi-device shader-info)
-			  (csi-in-buffer-memory shader-info)
-			  0
-			  (* (length (cpi-input compute-shader-info)) (cffi:foreign-type-size :float))
-			  (csi-in-buffer-memory shader-info)))
-	(c-array (csi-in-buffer-memory shader-info))
-	(lisp-array (cpi-input compute-shader-info)))
-
-    (unless (eql my-result :success)
-      (error (make-condition 'error-write-data-to-memory)))
-
-    ;; move lisp array elements into the c allocated memory making sure the type and alignment hold
-    (loop for i from 0 to (length lisp-array) do
-      (setf (cffi:mem-aref c-array :float i) (cffi:convert-to-foreign (aref lisp-array i) :float)))
-
-    ;; unmap-memory maps memory from host memory to device
-    (let ((my-out-result (vk:unmap-memory
-			  (csi-device shader-info)
-			  (csi-in-buffer-memory shader-info))))
-
-      (unless (eql my-out-result :success)
-	(error (make-condition 'error-write-data-to-memory)))
-
-      (do-bind-buffers-to-memory shader-info compute-shader-info))))
+  (let ((my-device (csi-device shader-info))
+	(my-c-array (csi-in-buffer-memory shader-info))
+	(my-lisp-array (cpi-input compute-shader-info)))
+    
+    (copy-to-device my-device my-c-array my-lisp-array :float)
+    
+    (do-bind-buffers-to-memory shader-info compute-shader-info)))
 
 (defun do-allocate-memory (shader-info compute-shader-info)  
   (let* ((my-in-buffer-memory-requirements
