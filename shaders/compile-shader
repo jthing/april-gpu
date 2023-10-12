@@ -1,0 +1,2 @@
+#!/bin/sh
+glslc --target-spv=spv1.3 square.comp -o square.comp.spv

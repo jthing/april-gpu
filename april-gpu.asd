@@ -8,4 +8,5 @@
   :serial t
   :depends-on (#:vk #:access #:iterate #:cl-ppcre #:yason #:april)
   :components ((:file "package")
+	       (:file "april-utils")
                (:file "april-gpu")))
