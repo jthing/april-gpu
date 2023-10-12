@@ -203,7 +203,8 @@
 	(vk:create-compute-pipelines
 	 (csi-device shader-info)
 	 (list my-compute-pipeline-create-info)
-	 :pipeline-cache (csi-pipeline-cache shader-info))
+	 (csi-pipeline-cache shader-info))
+      
       (when *debug-pipeline*
 	(print my-compute-pipeline-create-info)
 	(when *step* (break)))
