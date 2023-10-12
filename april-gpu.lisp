@@ -89,6 +89,7 @@
 (define-condition error-create-shader-module (error-compute-pipeline) ())
 (define-condition error-descriptor-set-layout (error-compute-pipeline) ())
 (define-condition error-pipeline-layout (error-compute-pipeline) ())
+(define-condition error-pipeline-cache (error-compute-pipeline) ())
 (define-condition error-pipeline (error-compute-pipeline) ())
 (define-condition error-desciptor-pool (error-compute-pipeline) ())
 (define-condition error-descriptor-sets (error-compute-pipeline) ())
@@ -151,7 +152,22 @@
     :accessor csi-in-buffer-memory)
    (out-buffer-memory
     :initform nil
-    :accessor csi-out-buffer-memory)))
+    :accessor csi-out-buffer-memory)
+   (descriptor-set
+    :initform nil
+    :accessor csi-descriptor-set)
+   (shader-module
+    :initform nil
+    :accessor csi-shader-module)
+   (pipeline-layout
+    :initform nil
+    :accessor csi-pipeline-layout)
+   (pipeline-cache
+    :initform nil
+    :accessor csi-pipeline-cache)
+   (pipelines
+    :initform nil
+    :accessor csi-pipelines)))
 
 (defun make-compute-shader-info ()
   (make-instance 'compute-shader-info))
@@ -169,10 +185,92 @@
 ;; do-utdate-descriptor-sets-to-use-our-buffers
 ;; do-descriptor-sets
 ;; do-desciptor-pool
-;; do-pipeline
-;; do-pipeline-layout
-;; do-descriptor-set-layout
-;; do-read-shader-&-Create-shader-module
+
+(defun do-create-pipeline (shader-info compute-shader-info)
+  (declare (ignorable compute-shader-info))
+  (let* ((my-pipeline-shader-stage-create-info
+	   (vk:make-pipeline-shader-stage-create-info
+	    :flags nil
+	    :stage :compute
+	    :module (csi-shader-module shader-info)
+	    :name "main"))
+	 (my-compute-pipeline-create-info
+	   (vk:make-compute-pipeline-create-info
+	    :flags nil
+	    :stage my-pipeline-shader-stage-create-info
+	    :layout (csi-pipeline-layout shader-info))))
+    (multiple-value-bind (my-pipelines result)
+	(vk:create-compute-pipelines
+	 (csi-device shader-info)
+	 (list my-compute-pipeline-create-info)
+	 :pipeline-cache (csi-pipeline-cache shader-info))
+      (when *debug-pipeline*
+	(print my-compute-pipeline-create-info)
+	(when *step* (break)))
+      (unless (eql result :success)
+	(error (make-condition 'error-pipeline)))
+      (setf (csi-pipelines shader-info) my-pipelines))
+    ))
+
+(defun do-pipeline-layout (shader-info compute-shader-info)
+  (let* ((my-pipeline-layout-create-info
+	   (vk:make-pipeline-layout-create-info
+	    :set-layouts (list (csi-descriptor-set shader-info))))
+	 (my-pipeline-layout-info
+	   my-pipeline-layout-create-info)
+	 (my-pipeline-cache-create-info
+	   (vk:make-pipeline-cache-create-info)))
+    
+    (multiple-value-bind (my-pipeline-layout result-layout)
+	(vk:create-pipeline-layout
+	 (csi-device shader-info)
+	 my-pipeline-layout-info)
+
+      (unless (eql result-layout :success)
+	(error (make-condition 'error-pipeline-layout)))
+      
+      (multiple-value-bind (my-pipeline-cache result-cache)
+	  (vk:create-pipeline-cache
+	   (csi-device shader-info)
+	   my-pipeline-cache-create-info)
+
+	(unless (eql result-cache :success)
+	  (error (make-condition 'error-pipeline-cache)))
+
+	(when *debug-pipeline*
+	  (print my-pipeline-layout-create-info)
+	  (print my-pipeline-cache-create-info)
+	  (when *step* (break)))
+
+	(setf (csi-pipeline-cache shader-info) my-pipeline-cache)
+	(setf (csi-pipeline-layout shader-info) my-pipeline-layout))))
+  (do-create-pipeline shader-info compute-shader-info))
+
+(defun do-descriptor-set-layout (shader-info compute-shader-info)
+  (setf (csi-descriptor-set shader-info)
+	(vk:create-descriptor-set-layout
+	 (csi-device shader-info)
+	 (vk:make-descriptor-set-layout-create-info
+					;:flags (vk:make-descriptor-set-layout-binding-flags-create-info)
+	  :bindings
+	  (list (vk:make-descriptor-set-layout-binding
+		 :binding 0 :descriptor-type :storage-buffer :descriptor-count 1 :stage-flags :compute)
+		(vk:make-descriptor-set-layout-binding
+		 :binding 1 :descriptor-type :storage-buffer :descriptor-count 1 :stage-flags :compute)))))
+  (do-pipeline-layout shader-info compute-shader-info))
+
+(defun do-create-shader-module (shader-info compute-shader-info)
+  (let ((my-shader-info
+	  (vk:make-shader-module-create-info :code (cpi-shader compute-shader-info))))
+    (multiple-value-bind (my-shader-module result)
+	(vk:create-shader-module (csi-device shader-info) my-shader-info)
+      (when *debug-pipeline*
+	(print my-shader-info)
+	(when *step*) (break))
+      (unless (eql result :success)
+	(error (make-condition 'error-create-shader-module)))
+      (setf (csi-shader-module shader-info) my-shader-module))
+    (do-descriptor-set-layout shader-info compute-shader-info)))
 
 (defun do-bind-buffers-to-memory (shader-info compute-shader-info)
   (declare (ignorable compute-shader-info))
@@ -189,7 +287,8 @@
 	   (csi-out-buffer-memory shader-info)
 	   0)))
     (unless (and (eql my-in-result :success) (eql my-out-result :success))
-      (error (make-condition 'error-bind-buffers-to-memory)))))
+      (error (make-condition 'error-bind-buffers-to-memory))))
+  (do-create-shader-module shader-info compute-shader-info))
 
 (defmacro with-mapped-memory ((p-data device memory offset size) &body body)
   `(cffi:with-foreign-object (,p-data :pointer)
@@ -372,6 +471,27 @@ Returns compute-shader-info (NB! not compute-pipeline-info)."
   (let ((info compute-shader-info))
     ;; info could still be alive when this returns. Remeber the repl * ** and ***
     ;; Therefore set the destroyed objects to nil
+
+    ;; Device.resetCommandPool(CommandPool, vk::CommandPoolResetFlags());
+    ;; Device.destroyFence(Fence);
+    ;; Device.destroyDescriptorPool(DescriptorPool);
+    ;; Device.destroyCommandPool(CommandPool);
+
+    (when (csi-pipelines info)
+      (vk:destroy-pipeline (csi-device info) (csi-pipelines info))
+      (setf (csi-pipelines info) nil))
+    (when (csi-shader-module info)
+      (vk:destroy-shader-module (csi-device info) (csi-shader-module info))
+      (setf (csi-shader-module info) nil))
+    (when (csi-pipeline-layout info)
+      (vk:destroy-pipeline-cache (csi-device info) (csi-pipeline-cache info))
+      (setf (csi-pipeline-cache info) nil))
+    (when (csi-pipeline-layout info)
+      (vk:destroy-pipeline-layout (csi-device info) (csi-pipeline-layout info))
+      (setf (csi-pipeline-layout info) nil))
+    (when (csi-descriptor-set info)
+      (vk:destroy-descriptor-set-layout (csi-device info) (csi-descriptor-set info))
+      (setf (csi-descriptor-set info) nil))
     (when (csi-in-buffer-memory info)
       (vk:free-memory (csi-device info) (csi-in-buffer-memory info))
       (setf (csi-in-buffer-memory info) nil))
@@ -419,36 +539,3 @@ Returns compute-shader-info (NB! not compute-pipeline-info)."
     (if (equalp (cpi-output my-compute-pipeline-info) my-cpu-vector)
 	(format t "Correlation: OK.~%")
 	(format t "Correlation: FAIL!~%"))))
-
-;; (with-instance (my-instance)
-;; 	(with-device (my-device)
-;; 	  (flet ((my-read-shader-file (shader-file)
-;;              (let ((my-file-path (merge-pathnames
-;;                                file-name
-;;                                (asdf:system-relative-pathname
-;;                                 'shaders
-;;                                 path)))))
-;; 		   (vk-utils:read-shader-source file-path))))
-;; 	  (let* ((my-vertex-shader-module-create-info
-;; 		   (vk:make-shader-module-create-info
-;; 		    :code (my-read-shader-file vertex-shader-file)))
-;; 		 (my-fragment-shader-module-create-info
-;; 		   (vk:make-shader-module-create-info
-;; 		    :code (my-read-shader-file my-fragment-shader-file)))
-;; 		 (vertex-shader-module (vk:create-shader-module device vertex-shader-module-create-info)))
-;; 	    (let ((my-fragment-shader-module (vk:create-shader-module device my-fragment-shader-module-create-info)))
-;; 		  (with-shader-module (my-fragment-shader-module)
-;; 		    )
-;; 	      ))))
-
-;; find-physical-device-limits (device)
-;;   (vk:get-physical-device-properties device))
-
-;; (defun init-compute-pipeline(device layout stage)
-;;   (let ((compute-pipeline (vk:make-compute-pipeline-create-info layout stage)))
-;;     (vk:create-compute-pipelines device compute-pipeline)))
-
-;; (defun create-compute-pipeline (device set-layouts)
-;;   "Vanilla VkPipelineCreateInfo"
-;;   (let ((layout-info (vk:make-pipeline-layout-create-info set-layouts))))
-;;   (vk:create-pipeline-layout device layout-info))
