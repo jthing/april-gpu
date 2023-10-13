@@ -1,4 +1,4 @@
-x;;;; april-gpu.lisp
+;;;; april-gpu.lisp
 ;;;; Author: John Thingstad
 ;;;; Creation Date: oct. 2 2023
 ;;;; Short Description: Setup a compute shader pipeline to allow april to run computations on a GPU.
@@ -87,7 +87,7 @@ x;;;; april-gpu.lisp
 (define-condition error-bind-buffers-to-memory (error-compute-pipeline) ())
 (define-condition error-read-shader (error-compute-pipeline) ())
 (define-condition error-create-shader-module (error-compute-pipeline) ())
-(define-condition error-descriptor-set-layout (error-compute-pipeline) ())
+(define-condition error-create-descriptor-set (error-compute-pipeline) ())
 (define-condition error-pipeline-layout (error-compute-pipeline) ())
 (define-condition error-pipeline-cache (error-compute-pipeline) ())
 (define-condition error-pipeline (error-compute-pipeline) ())
@@ -200,17 +200,19 @@ x;;;; april-gpu.lisp
 	    :stage my-pipeline-shader-stage-create-info
 	    :layout (csi-pipeline-layout shader-info))))
 
+    (when *debug-pipeline*
+      (print my-compute-pipeline-create-info)
+      (when *step* (break)))
+
     (multiple-value-bind (my-pipelines result)
 	(vk:create-compute-pipelines
 	 (csi-device shader-info)
-	 (list my-compute-pipeline-create-info)
-	 (csi-pipeline-cache shader-info))
+	 (list my-compute-pipeline-create-info))
+	 ;(csi-pipeline-cache shader-info))
       
-      (when *debug-pipeline*
-	(print my-compute-pipeline-create-info)
-	(when *step* (break)))
       (unless (eql result :success)
 	(error (make-condition 'error-pipeline)))
+
       (setf (csi-pipelines shader-info) my-pipelines))
     ))
 
@@ -249,34 +251,58 @@ x;;;; april-gpu.lisp
   (do-create-pipeline shader-info compute-shader-info))
 
 (defun do-descriptor-set-layout (shader-info compute-shader-info)
-  (setf (csi-descriptor-set shader-info)
+  (let* ((my-descriptor-set-binding-1
+	   (vk:make-descriptor-set-layout-binding
+	    :binding 0
+	    :descriptor-type :storage-buffer
+	    :descriptor-count 1
+	    :stage-flags :compute))
+	 (my-descriptor-set-binding-2
+	   (vk:make-descriptor-set-layout-binding
+	    :binding 1
+	    :descriptor-type :storage-buffer
+	    :descriptor-count 1
+	    :stage-flags :compute))
+	 (my-descriptor-set-layout-info
+	   (vk:make-descriptor-set-layout-create-info
+            ;:flags (vk:make-descriptor-set-layout-binding-flags-create-info)
+	    :bindings
+	    (list my-descriptor-set-binding-1 my-descriptor-set-binding-2))))
+
+    (multiple-value-bind (my-descriptor-set result)
 	(vk:create-descriptor-set-layout
 	 (csi-device shader-info)
-	 (vk:make-descriptor-set-layout-create-info
-					;:flags (vk:make-descriptor-set-layout-binding-flags-create-info)
-	  :bindings
-	  (list (vk:make-descriptor-set-layout-binding
-		 :binding 0 :descriptor-type :storage-buffer :descriptor-count 1 :stage-flags :compute)
-		(vk:make-descriptor-set-layout-binding
-		 :binding 1 :descriptor-type :storage-buffer :descriptor-count 1 :stage-flags :compute)))))
+	 my-descriptor-set-layout-info)
+
+      (when *debug-pipeline*
+	(print my-descriptor-set-layout-info)
+	(when *step* (break)))
+
+      (unless (eql result :success)
+	(error (make-condition 'error-create-descriptor-set)))
+
+      (setf (csi-descriptor-set shader-info) my-descriptor-set)))
   (do-pipeline-layout shader-info compute-shader-info))
 
 (defun do-create-shader-module (shader-info compute-shader-info)
   (let ((my-shader-info
 	  (vk:make-shader-module-create-info :code (cpi-shader compute-shader-info))))
+
     (multiple-value-bind (my-shader-module result)
 	(vk:create-shader-module (csi-device shader-info) my-shader-info)
+
       (when *debug-pipeline*
 	(print my-shader-info)
-	(when *step*) (break))
+	(when *step* (break)))
+
       (unless (eql result :success)
 	(error (make-condition 'error-create-shader-module)))
+
       (setf (csi-shader-module shader-info) my-shader-module))
     (do-descriptor-set-layout shader-info compute-shader-info)))
 
 (defun do-bind-buffers-to-memory (shader-info compute-shader-info)
-  (declare (ignorable compute-shader-info))
-  (let*((my-in-result
+  (let* ((my-in-result
 	  (vk:bind-buffer-memory
 	   (csi-device shader-info)
 	   (csi-input-buffer shader-info)
@@ -288,8 +314,10 @@ x;;;; april-gpu.lisp
 	   (csi-output-buffer shader-info)
 	   (csi-out-buffer-memory shader-info)
 	   0)))
+
     (unless (and (eql my-in-result :success) (eql my-out-result :success))
       (error (make-condition 'error-bind-buffers-to-memory))))
+
   (do-create-shader-module shader-info compute-shader-info))
 
 (defun do-write-data-to-memory (shader-info compute-shader-info)
