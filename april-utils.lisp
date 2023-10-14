@@ -30,3 +30,7 @@ DATA-TYPE - a foreign CFFI type corresponding to DATA's type."
         (vk-utils:memcpy (cffi:mem-aref p-mapped :pointer)
                          p-data
                          data-size)))))
+
+(declaim (inline buffer-size))
+(defun buffer-size (buffer type)
+  (* (length buffer) (cffi:foreign-type-size type)))
