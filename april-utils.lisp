@@ -50,8 +50,8 @@ DATA-TYPE - a foreign CFFI type corresponding to DATA's type."
                   ((arrayp data) (aref data i))
                   ((listp data) (nth i data))
                   (t data))))
-        (vk-utils:memcpy (cffi:mem-aref p-mapped :pointer)
-                         p-data
+        (vk-utils:memcpy p-data
+                         (cffi:mem-aref p-mapped :pointer)
                          data-size)))))
 
 (declaim (inline buffer-size))
