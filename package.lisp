@@ -3,8 +3,9 @@
 (defpackage #:april-utils
   (:use #:cl #:vk)
   (:export
-   #:copy-to-device
    #:with-mapped-memory
+   #:copy-to-device
+   #:copy-from-device
    #:buffer-size))
 
 (defpackage #:april-gpu

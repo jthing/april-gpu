@@ -79,6 +79,7 @@
 (define-condition error-create-instance (error-compute-pipeline) ())
 (define-condition error-physical-device (error-compute-pipeline) ())
 (define-condition error-queue-family (error-compute-pipeline) ())
+(define-condition error-queue-submit (error-compute-pipeline) ())
 (define-condition error-create-device (error-compute-pipeline) ())
 (define-condition error-create-buffers (error-compute-pipeline) ())
 (define-condition error-query-memory-types (error-compute-pipeline) ())
@@ -187,10 +188,38 @@
 ;;--------------------------------------------------
 
 (defun do-read-output (shader-info compute-shader-info)
-  (declare (ignorable shader-info compute-shader-info))
-  )
+  (let ((my-device (csi-device shader-info))
+	(my-c-array (csi-in-buffer-memory shader-info))
+	(my-lisp-array (cpi-output compute-shader-info)))
+    
+    (au:copy-from-device my-device my-c-array my-lisp-array :float)))
 
 (defun do-submit-work-and-wait (shader-info compute-shader-info)
+  (let* ((my-queue (vk:get-device-queue (csi-device shader-info) (csi-memory-type-index shader-info) 0))
+	 (my-fence-create-info (vk:make-fence-create-info))
+	 (my-fence (vk:create-fence (csi-device shader-info) my-fence-create-info))
+	 (my-submit-info
+	   (vk:make-submit-info
+	    :wait-semaphores nil
+	    :wait-dst-stage-mask nil
+	    :command-buffers (list (csi-command-buffer shader-info)))))
+
+    (let ((result
+	    (vk:queue-submit my-queue (list my-submit-info) my-fence)))
+
+      (unless (eql result :success)
+	(error (make-condition 'error-queue-submit)))
+
+      (let ((result
+	      (vk:wait-for-fences
+	       (csi-device shader-info)
+	       (list my-fence)         ; List of fences
+	       t                       ; Wait all
+	       -1)))                   ; Timeout
+
+	(unless (eql result :success)
+	  (error (make-condition 'error-submit-work-and-wait))))))
+  
   (do-read-output shader-info compute-shader-info))
 
 (defun do-record-commands (shader-info compute-shader-info)
@@ -479,7 +508,7 @@
 	(my-c-array (csi-in-buffer-memory shader-info))
 	(my-lisp-array (cpi-input compute-shader-info)))
     
-    (copy-to-device my-device my-c-array my-lisp-array :float)
+    (au:copy-to-device my-device my-c-array my-lisp-array :float)
     
     (do-bind-buffers-to-memory shader-info compute-shader-info)))
 
