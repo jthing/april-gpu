@@ -194,7 +194,7 @@
     
     (au:copy-from-device my-device my-c-array my-lisp-array :float)))
 
-(defun do-submit-work-and-wait (shader-info compute-shader-info)
+(defun do-submit-work-and-wait (shader-info)
   (let* ((my-queue (vk:get-device-queue (csi-device shader-info) (csi-memory-type-index shader-info) 0))
 	 (my-fence-create-info (vk:make-fence-create-info))
 	 (my-fence (vk:create-fence (csi-device shader-info) my-fence-create-info))
@@ -218,9 +218,7 @@
 	       -1)))                   ; Timeout
 
 	(unless (eql result :success)
-	  (error (make-condition 'error-submit-work-and-wait))))))
-  
-  (do-read-output shader-info compute-shader-info))
+	  (error (make-condition 'error-submit-work-and-wait)))))))
 
 (defun do-record-commands (shader-info compute-shader-info)
   (let ((my-command-buffer-begin-info
@@ -242,11 +240,9 @@
        (list my-descriptor-set)   ; List of descriptor sets
        (list))                    ; Dynamic offsets
       (vk:cmd-dispatch my-command-buffer (length my-in-buffer) 1 1)
-      (vk:end-command-buffer my-command-buffer))
-    
-  (do-submit-work-and-wait shader-info compute-shader-info))
+      (vk:end-command-buffer my-command-buffer)))
 
-(defun do-create-command-buffer (shader-info compute-shader-info)
+(defun do-create-command-buffer (shader-info)
   (let ((my-command-buffer-allocate-info
 	  (vk:make-command-buffer-allocate-info
 	   :command-pool (csi-command-pool shader-info)
@@ -262,10 +258,9 @@
       (unless (eql result :successs)
 	(error (make-condition 'error-command-buffer)))
 
-      (setf (csi-command-buffer shader-info) (first my-command-buffers))))
-  (do-record-commands shader-info compute-shader-info))
+      (setf (csi-command-buffer shader-info) (first my-command-buffers)))))
 
-(defun do-create-command-pool (shader-info compute-shader-info)
+(defun do-create-command-pool (shader-info)
   (let ((my-command-pool-create-info
 	  (vk:make-command-pool-create-info
 	   :flags 0
@@ -281,11 +276,9 @@
       (unless (eql result :success)
 	(error (make-condition 'error-command-pool)))
 
-      (setf (csi-command-pool shader-info) my-command-pool)))
-  
-  (do-create-command-pool shader-info compute-shader-info))
+      (setf (csi-command-pool shader-info) my-command-pool))))
 
-(defun do-utdate-descriptor-sets-to-use-our-buffers (shader-info compute-shader-info)
+(defun do-utdate-descriptor-sets-to-use-our-buffers (shader-info)
   (let* ((my-in-buffer-info
 	   (vk:make-descriptor-buffer-info
 	    :buffer (csi-input-buffer shader-info)
@@ -320,11 +313,9 @@
       (print my-descriptor-write)
       (when *step* (break)))
 
-    (vk:update-descriptor-sets (csi-device shader-info) my-descriptor-write (list)))
+    (vk:update-descriptor-sets (csi-device shader-info) my-descriptor-write (list))))
 
-  (do-create-command-pool shader-info compute-shader-info))
-
-(defun do-create-descriptor-sets (shader-info compute-shader-info)
+(defun do-create-descriptor-sets (shader-info)
   (let ((my-desciptor-set-allocate-info
 	  (vk:make-descriptor-set-allocate-info)))
     (multiple-value-bind (my-descriptor-sets result)
@@ -337,11 +328,9 @@
       (unless (eql result :success)
 	(error (make-condition 'error-descriptor-sets)))
 
-      (setf (csi-descriptor-set shader-info) (first my-descriptor-sets))))
-      
-  (do-utdate-descriptor-sets-to-use-our-buffers shader-info compute-shader-info))
+      (setf (csi-descriptor-set shader-info) (first my-descriptor-sets)))))
 
-(defun do-create-desciptor-pool (shader-info compute-shader-info)
+(defun do-create-desciptor-pool (shader-info)
   (let* ((my-descritor-pool-size
 	   (vk:make-descriptor-pool-size
 	    :type :storage-buffer
@@ -362,12 +351,9 @@
       (unless (eql result :success)
 	(error (make-condition 'error-descriptor-pool)))
 
-      (setf (csi-descriptor-pool my-descriptor-pool) my-descriptor-pool)))
-      
-  (do-create-descriptor-sets shader-info compute-shader-info))
+      (setf (csi-descriptor-pool my-descriptor-pool) my-descriptor-pool))))
 
-(defun do-create-pipeline (shader-info compute-shader-info)
-  (declare (ignorable compute-shader-info))
+(defun do-create-pipeline (shader-info)
   (let* ((my-pipeline-shader-stage-create-info
 	   (vk:make-pipeline-shader-stage-create-info
 	    :flags nil
@@ -387,17 +373,15 @@
     (multiple-value-bind (my-compute-pipeline result)
 	(vk:create-compute-pipelines
 	 (csi-device shader-info)
-	 (list my-compute-pipeline-create-info))
-	 ;(csi-pipeline-cache shader-info))
+	 (list my-compute-pipeline-create-info)
+	 (csi-pipeline-cache shader-info))
       
       (unless (eql result :success)
 	(error (make-condition 'error-pipeline)))
 
-      (setf (csi-compute-pipeline shader-info) my-compute-pipeline)))
+      (setf (csi-compute-pipeline shader-info) my-compute-pipeline))))
 
-  (do-create-desciptor-pool shader-info compute-shader-info))
-
-(defun do-pipeline-layout (shader-info compute-shader-info)
+(defun do-pipeline-layout (shader-info)
   (let* ((my-pipeline-layout-create-info
 	   (vk:make-pipeline-layout-create-info
 	    :set-layouts (list (csi-descriptor-set shader-info))))
@@ -428,62 +412,9 @@
 	  (when *step* (break)))
 
 	(setf (csi-pipeline-cache shader-info) my-pipeline-cache)
-	(setf (csi-pipeline-layout shader-info) my-pipeline-layout))))
+	(setf (csi-pipeline-layout shader-info) my-pipeline-layout)))))
 
-  (do-create-pipeline shader-info compute-shader-info))
-
-(defun do-descriptor-set-layout (shader-info compute-shader-info)
-  (let* ((my-descriptor-set-binding-1
-	   (vk:make-descriptor-set-layout-binding
-	    :binding 0
-	    :descriptor-type :storage-buffer
-	    :descriptor-count 1
-	    :stage-flags :compute))
-	 (my-descriptor-set-binding-2
-	   (vk:make-descriptor-set-layout-binding
-	    :binding 1
-	    :descriptor-type :storage-buffer
-	    :descriptor-count 1
-	    :stage-flags :compute))
-	 (my-descriptor-set-layout-info
-	   (vk:make-descriptor-set-layout-create-info
-            ;:flags (vk:make-descriptor-set-layout-binding-flags-create-info)
-	    :bindings
-	    (list my-descriptor-set-binding-1 my-descriptor-set-binding-2))))
-
-    (multiple-value-bind (my-descriptor-set result)
-	(vk:create-descriptor-set-layout
-	 (csi-device shader-info)
-	 my-descriptor-set-layout-info)
-
-      (when *debug-pipeline*
-	(print my-descriptor-set-layout-info)
-	(when *step* (break)))
-
-      (unless (eql result :success)
-	(error (make-condition 'error-create-descriptor-set)))
-
-      (setf (csi-descriptor-set shader-info) my-descriptor-set)))
-  (do-pipeline-layout shader-info compute-shader-info))
-
-(defun do-create-shader-module (shader-info compute-shader-info)
-  (let ((my-shader-info
-	  (vk:make-shader-module-create-info :code (cpi-shader compute-shader-info))))
-
-    (multiple-value-bind (my-shader-module result)
-	(vk:create-shader-module (csi-device shader-info) my-shader-info)
-
-      (when *debug-pipeline*
-	(print my-shader-info)
-	(when *step* (break)))
-
-      (unless (eql result :success)
-	(error (make-condition 'error-create-shader-module)))
-
-      (setf (csi-shader-module shader-info) my-shader-module))
-    (do-descriptor-set-layout shader-info compute-shader-info)))
-
-(defun do-bind-buffers-to-memory (shader-info compute-shader-info)
+(defun do-descriptor-set-layout (shader-info)
   (let* ((my-in-result
 	  (vk:bind-buffer-memory
 	   (csi-device shader-info)
@@ -498,9 +429,7 @@
 	   0)))
 
     (unless (and (eql my-in-result :success) (eql my-out-result :success))
-      (error (make-condition 'error-bind-buffers-to-memory))))
-
-  (do-create-shader-module shader-info compute-shader-info))
+      (error (make-condition 'error-bind-buffers-to-memory)))))
 
 (defun do-write-data-to-memory (shader-info compute-shader-info)
   ;; map-memory writes data from device to host memory
@@ -508,11 +437,9 @@
 	(my-c-array (csi-in-buffer-memory shader-info))
 	(my-lisp-array (cpi-input compute-shader-info)))
     
-    (au:copy-to-device my-device my-c-array my-lisp-array :float)
-    
-    (do-bind-buffers-to-memory shader-info compute-shader-info)))
+    (au:copy-to-device my-device my-c-array my-lisp-array :float)))
 
-(defun do-allocate-memory (shader-info compute-shader-info)  
+(defun do-allocate-memory (shader-info)
   (let* ((my-in-buffer-memory-requirements
 	   (vk:get-buffer-memory-requirements
 	    (csi-device shader-info)
@@ -549,11 +476,9 @@
 	  (error (make-condition 'error-allocate-memory)))
 
 	(setf (csi-in-buffer-memory shader-info) my-in-buffer-memory)
-        (setf (csi-out-buffer-memory shader-info) my-out-buffer-memory)))
+        (setf (csi-out-buffer-memory shader-info) my-out-buffer-memory)))))
 
-    (do-write-data-to-memory shader-info compute-shader-info)))
-
-(defun do-query-memory-types (shader-info compute-shader-info)
+(defun do-query-memory-types (shader-info)
   (let* ((my-device (csi-physical-device shader-info))
 	 (my-memory-properties (vk:get-physical-device-memory-properties my-device))
 	 (my-memory-types (vk:memory-types my-memory-properties))
@@ -571,9 +496,7 @@
       (print (elt my-memory-types my-memory-index))
       (when *step* (break)))
 
-    (setf (csi-memory-type-index shader-info) my-memory-index))
-
-  (do-allocate-memory shader-info compute-shader-info))
+    (setf (csi-memory-type-index shader-info) my-memory-index)))
 
 (defun do-create-buffers (shader-info compute-pipeline-info)
   (let ((my-input-buffer-create-info
@@ -603,11 +526,9 @@
 	(when *step* (break)))
 
       (setf (csi-input-buffer shader-info) input-buffer)
-      (setf (csi-output-buffer shader-info) output-buffer)))
+      (setf (csi-output-buffer shader-info) output-buffer))))
 
-  (do-query-memory-types shader-info compute-pipeline-info))
-
-(defun do-create-physical-device (shader-info compute-pipeline-info)
+(defun do-create-physical-device (shader-info)
   (let* ((my-physical-device (first (vk:enumerate-physical-devices (csi-instance shader-info))))
 	 (my-queue-family-properties (vk:get-physical-device-queue-family-properties my-physical-device))
 	 (my-compute-queue-family-index
@@ -634,11 +555,9 @@
 	(error (make-condition 'error-create-device)))
 
       (setf (csi-physical-device shader-info) my-physical-device)
-      (setf (csi-device shader-info) my-device)
+      (setf (csi-device shader-info) my-device))))
 
-      (do-create-buffers shader-info compute-pipeline-info))))
-
-(defun do-create-instance (shader-info compute-pipeline-info)
+(defun do-create-instance (shader-info)
   (let* ((my-application-info (vk:make-application-info
 			       :application-name *application-name*
 			       :application-version (apply #'vk:make-version *application-version*)
@@ -659,18 +578,7 @@
       (unless (eql status :success)
 	(error (make-condition 'error-create-instance)))
 
-      (setf (csi-instance shader-info) my-instance)
-
-      (do-create-physical-device shader-info compute-pipeline-info))))
-
-(defun create-compute-pipeline (compute-pipeline-info)
-  "Execute the compute shader in compute-pipeline-info on the GPU.
-The input and output arrays are set in compute-pipeline-info.
-Returns compute-shader-info (NB! not compute-pipeline-info)."
-  (let ((shader-info (make-compute-shader-info)))
-    (unwind-protect 
-	 (do-create-instance shader-info compute-pipeline-info)
-      (cleanup-compute-pipeline shader-info))))
+      (setf (csi-instance shader-info) my-instance))))
 
 (defun cleanup-compute-pipeline (compute-shader-info)
   (let ((info compute-shader-info))
@@ -722,6 +630,31 @@ Returns compute-shader-info (NB! not compute-pipeline-info)."
     (when (csi-instance info)
       (vk:destroy-instance (csi-instance info))
       (setf (csi-instance info) nil))))
+
+(defun create-compute-pipeline (compute-pipeline-info)
+  "Execute the compute shader in compute-pipeline-info on the GPU.
+The input and output arrays are set in compute-pipeline-info.
+Returns compute-shader-info (NB! not compute-pipeline-info)."
+  (let ((shader-info (make-compute-shader-info)))
+    (with-destructor (cleanup-compute-pipeline shader-info)
+      (do-create-instance shader-info)
+      (do-create-instance shader-info)
+      (do-create-physical-device shader-info)
+      (do-create-buffers shader-info compute-pipeline-info)
+      (do-query-memory-types shader-info)
+      (do-allocate-memory shader-info)
+      (do-write-data-to-memory shader-info compute-pipeline-info)
+      (do-descriptor-set-layout shader-info)
+      (do-pipeline-layout shader-info)
+      (do-create-pipeline shader-info)
+      (do-create-desciptor-pool shader-info)
+      (do-create-descriptor-sets shader-info)
+      (do-utdate-descriptor-sets-to-use-our-buffers shader-info)
+      (do-create-command-pool shader-info)
+      (do-create-command-buffer shader-info)
+      (do-record-commands shader-info compute-pipeline-info)
+      (do-submit-work-and-wait shader-info)
+      (do-read-output shader-info compute-pipeline-info))))
 
 (defun test-compute-pipeline ()
   (let* ((my-input-vector

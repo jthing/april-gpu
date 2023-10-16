@@ -4,6 +4,7 @@
   (:use #:cl #:vk)
   (:export
    #:with-mapped-memory
+   #:with-destructor
    #:copy-to-device
    #:copy-from-device
    #:buffer-size))

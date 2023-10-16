@@ -7,6 +7,10 @@
           (progn ,@body)
        (vk:unmap-memory ,device ,memory))))
 
+(defmacro with-destructor (destructor &body body)
+  `(unwind-protect
+	(progn ,@body)
+     ,destructor))
 
 (defun copy-to-device (device memory data data-type &optional (offset 0))
   "Copies data to device memory.
