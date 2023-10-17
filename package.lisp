@@ -16,6 +16,7 @@
    (#:vk #:vk)
    (#:au #:april-utils))
   (:export
+   #:make-compute-pipeline-info
    #:make-compute-shader-info
    #:create-compute-pipeline
    #:cleanup-compute-pipeline))
