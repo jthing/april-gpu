@@ -122,6 +122,14 @@
 	     :accessor cpi-output)))
 
 (defun make-compute-pipeline-info (&key shader input output)
+  "Set the data to compute with here.
+
+shader - the binary format of shaders
+input  - a input array to compute on
+output - a output arry to return the result to
+
+vk-utils:read-shader-source can be used to read a compiled spir-v file from disk
+"
   (make-instance 'compute-pipeline-info :shader shader :input input :output output))
 
 ;;--------------------------------------------------
@@ -188,6 +196,7 @@
     :accessor csi-fence)))
 
 (defun make-compute-shader-info ()
+  "Data created by create-compute-shader, opaque outside april-gpu"
   (make-instance 'compute-shader-info))
 
 ;;--------------------------------------------------
@@ -755,8 +764,20 @@
 
 (defun create-compute-pipeline (shader-info compute-pipeline-info)
   "Execute the compute shader in compute-pipeline-info on the GPU.
+Input: shader-info - make-compute-shader-info
+       compute-pipeline-info - input buffer, output buffer and binary shader
 The input and output arrays are set in compute-pipeline-info.
-Returns compute-shader-info (NB! not compute-pipeline-info)."
+example:
+
+(let ((my-compute-pipeline-info
+	   (make-compute-pipeline-info
+	    :shader my-shader-object
+	    :input my-input-vector
+	    :output my-output-vector))
+      (shader-info (make-compute-shader-info)))
+ (au:with-destructor (cleanup-compute-pipeline shader-info)
+   (create-compute-pipeline shader-info my-compute-pipeline-info)))
+"
   (do-create-instance shader-info)
   (do-create-physical-device shader-info)
   (do-find-queue-family shader-info)
