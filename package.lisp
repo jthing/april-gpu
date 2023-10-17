@@ -14,4 +14,8 @@
   (:use #:cl)
   (:local-nicknames
    (#:vk #:vk)
-   (#:au #:april-utils)))
+   (#:au #:april-utils))
+  (:export
+   #:make-compute-shader-info
+   #:create-compute-pipeline
+   #:cleanup-compute-pipeline))

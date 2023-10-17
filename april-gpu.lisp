@@ -444,10 +444,12 @@
 	    :descriptor-type :storage-buffer
 	    :descriptor-count 1
 	    :stage-flags :compute))
-	 (my-descriptor-set-layout-bindings (list my-descriptor-set-binding1 my-descriptor-set-binding2))
+	 (my-descriptor-set-layout-bindings
+	   (list my-descriptor-set-binding1 my-descriptor-set-binding2))
 	 (my-descriptor-set-layout-create-info
 	   (vk:make-descriptor-set-layout-create-info
-	    :flags (vk:make-descriptor-set-layout-binding-flags-create-info :binding-flags :compute)
+	    :flags (vk:make-descriptor-set-layout-binding-flags-create-info
+		    :binding-flags :compute)
 	    :bindings my-descriptor-set-layout-bindings
 	    )))
 
@@ -751,34 +753,32 @@
       (vk:destroy-instance (csi-instance info))
       (setf (csi-instance info) nil))))
 
-(defun create-compute-pipeline (compute-pipeline-info)
+(defun create-compute-pipeline (shader-info compute-pipeline-info)
   "Execute the compute shader in compute-pipeline-info on the GPU.
 The input and output arrays are set in compute-pipeline-info.
 Returns compute-shader-info (NB! not compute-pipeline-info)."
-  (let ((shader-info (make-compute-shader-info)))
-    (au:with-destructor (cleanup-compute-pipeline shader-info)
-      (do-create-instance shader-info)
-      (do-create-physical-device shader-info)
-      (do-find-queue-family shader-info)
-      (do-create-device shader-info)
-      (do-create-buffers shader-info compute-pipeline-info)
-      (do-query-memory-types shader-info)
-      (do-allocate-memory shader-info)
-      (do-write-data-to-memory shader-info compute-pipeline-info)
-      (do-bind-buffers-to-memory shader-info)
-      (do-create-shader-module shader-info compute-pipeline-info)
-      (do-create-descriptor-set-layout shader-info)
-      (do-pipeline-layout shader-info)
-      (do-create-pipeline shader-info)
-      (do-create-desciptor-pool shader-info)
-      (do-create-descriptor-sets shader-info)
-      (do-utdate-descriptor-sets-to-use-our-buffers shader-info)
-      (do-create-command-pool shader-info)
-      (do-create-command-buffer shader-info)
-      (do-record-commands shader-info compute-pipeline-info)
-      (do-submit-work-and-wait shader-info)
-      (do-read-output shader-info compute-pipeline-info)))
-  compute-pipeline-info)
+  (do-create-instance shader-info)
+  (do-create-physical-device shader-info)
+  (do-find-queue-family shader-info)
+  (do-create-device shader-info)
+  (do-create-buffers shader-info compute-pipeline-info)
+  (do-query-memory-types shader-info)
+  (do-allocate-memory shader-info)
+  (do-write-data-to-memory shader-info compute-pipeline-info)
+  (do-bind-buffers-to-memory shader-info)
+  (do-create-shader-module shader-info compute-pipeline-info)
+  (do-create-descriptor-set-layout shader-info)
+  (do-pipeline-layout shader-info)
+  (do-create-pipeline shader-info)
+  (do-create-desciptor-pool shader-info)
+  (do-create-descriptor-sets shader-info)
+  (do-utdate-descriptor-sets-to-use-our-buffers shader-info)
+  (do-create-command-pool shader-info)
+  (do-create-command-buffer shader-info)
+  (do-record-commands shader-info compute-pipeline-info)
+  (do-submit-work-and-wait shader-info)
+  (do-read-output shader-info compute-pipeline-info)
+  (values))
 
 (defun test-compute-pipeline ()
   (let* ((my-input-vector
@@ -801,7 +801,11 @@ Returns compute-shader-info (NB! not compute-pipeline-info)."
 	    :shader my-shader-object
 	    :input my-input-vector
 	    :output my-output-vector)))
-    (create-compute-pipeline my-compute-pipeline-info)
+
+    (let ((shader-info (make-compute-shader-info)))
+      (au:with-destructor (cleanup-compute-pipeline shader-info)
+	(create-compute-pipeline shader-info my-compute-pipeline-info)))
+    
     (format t "~&Input:         ~{~a~^, ~}~%" (coerce (cpi-input  my-compute-pipeline-info) 'list))
     (format t "Output shader: ~{~a~^, ~}~%" (coerce (cpi-output my-compute-pipeline-info) 'list))
     (format t "Reference CPU: ~{~a~^, ~}~%" (coerce my-cpu-vector 'list))
