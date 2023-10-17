@@ -6,7 +6,7 @@
   :license  "Apache Licence 2.0"
   :version "0.0.1"
   :serial t
-  :depends-on (#:vk #:access #:iterate #:cl-ppcre #:yason #:april)
+  :depends-on (#:vk #:april)
   :components ((:file "package")
 	       (:file "april-utils")
                (:file "april-gpu")))

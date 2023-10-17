@@ -1,7 +1,8 @@
 ;;;; package.lisp
 
 (defpackage #:april-utils
-  (:use #:cl #:vk)
+  (:use #:cl)
+  (:local-nicknames (#:vk #:vk))
   (:export
    #:with-mapped-memory
    #:with-destructor
@@ -10,5 +11,7 @@
    #:buffer-size))
 
 (defpackage #:april-gpu
-  (:use #:cl #:vk #:iterate #:access #:april-utils)
-  (:local-nicknames (:au :april-utils)))
+  (:use #:cl)
+  (:local-nicknames
+   (#:vk #:vk)
+   (#:au #:april-utils)))

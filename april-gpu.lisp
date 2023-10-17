@@ -93,6 +93,7 @@
 (define-condition error-pipeline-cache (error-compute-pipeline) ())
 (define-condition error-pipeline (error-compute-pipeline) ())
 (define-condition error-descriptor-pool (error-compute-pipeline) ())
+(define-condition error-create-descriptor-set-layout (error-compute-pipeline) ())
 (define-condition error-descriptor-sets (error-compute-pipeline) ())
 (define-condition error-command-pool (error-compute-pipeline) ())
 (define-condition error-command-buffer (error-compute-pipeline) ())
@@ -158,6 +159,9 @@
    (descriptor-set
     :initform nil
     :accessor csi-descriptor-set)
+   (descriptor-set-layout
+    :initform nil
+    :accessor csi-descriptor-set-layout)
    (shader-module
     :initform nil
     :accessor csi-shader-module)
@@ -427,6 +431,41 @@
       (setf (csi-descriptor-set shader-info) (first my-descriptor-sets))))
   (values))
 
+(defun do-create-descriptor-set-layout (shader-info)
+  (let* ((my-descriptor-set-binding1
+	   (vk:make-descriptor-set-layout-binding
+	    :binding 0
+	    :descriptor-type :storage-buffer
+	    :descriptor-count 1
+	    :stage-flags :compute))
+	 (my-descriptor-set-binding2
+	   (vk:make-descriptor-set-layout-binding
+	    :binding 1
+	    :descriptor-type :storage-buffer
+	    :descriptor-count 1
+	    :stage-flags :compute))
+	 (my-descriptor-set-layout-bindings (list my-descriptor-set-binding1 my-descriptor-set-binding2))
+	 (my-descriptor-set-layout-create-info
+	   (vk:make-descriptor-set-layout-create-info
+	    :flags (vk:make-descriptor-set-layout-binding-flags-create-info :binding-flags :compute)
+	    :bindings my-descriptor-set-layout-bindings
+	    )))
+
+    (multiple-value-bind (my-descriptor-set-layout result)
+	(vk:create-descriptor-set-layout
+	 (csi-device shader-info)
+	 my-descriptor-set-layout-create-info)
+
+      (when *debug-pipeline*
+	(print my-descriptor-set-layout-create-info)
+	(when *step* (break)))
+
+      (unless (eql result :success)
+	(error (make-condition 'error-create-descriptor-set-layout)))
+
+      (setf (csi-descriptor-set-layout shader-info) my-descriptor-set-layout)))
+  (values))
+
 (defun do-create-shader-module (shader-info compute-shader-info)
   (let ((my-shader-module-create-info
 	  (vk:make-shader-module-create-info
@@ -592,7 +631,7 @@
 	    (csi-physical-device shader-info)))
 	 (my-index
 	   (position-if
-	    (lambda (property) (eql (queue-flags property) :compute))
+	    (lambda (property) (eql (vk:queue-flags property) :compute))
 	    my-queue-family-properties)))
 
     (when *debug-pipeline*
@@ -687,6 +726,9 @@
     (when (csi-pipeline-layout info)
       (vk:destroy-pipeline-layout (csi-device info) (csi-pipeline-layout info))
       (setf (csi-pipeline-layout info) nil))
+    (when (csi-descriptor-set-layout info)
+      (vk:destroy-descriptor-set-layout (csi-device info) (csi-descriptor-set-layout info))
+      (setf (csi-descriptor-set-layout info) nil))
     (when (csi-descriptor-set info)
       (vk:destroy-descriptor-set-layout (csi-device info) (csi-descriptor-set info))
       (setf (csi-descriptor-set info) nil))
@@ -714,7 +756,7 @@
 The input and output arrays are set in compute-pipeline-info.
 Returns compute-shader-info (NB! not compute-pipeline-info)."
   (let ((shader-info (make-compute-shader-info)))
-    (with-destructor (cleanup-compute-pipeline shader-info)
+    (au:with-destructor (cleanup-compute-pipeline shader-info)
       (do-create-instance shader-info)
       (do-create-physical-device shader-info)
       (do-find-queue-family shader-info)
@@ -725,7 +767,7 @@ Returns compute-shader-info (NB! not compute-pipeline-info)."
       (do-write-data-to-memory shader-info compute-pipeline-info)
       (do-bind-buffers-to-memory shader-info)
       (do-create-shader-module shader-info compute-pipeline-info)
-      (do-descriptor-set-layout shader-info)
+      (do-create-descriptor-set-layout shader-info)
       (do-pipeline-layout shader-info)
       (do-create-pipeline shader-info)
       (do-create-desciptor-pool shader-info)
