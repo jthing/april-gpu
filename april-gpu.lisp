@@ -196,7 +196,8 @@ vk-utils:read-shader-source can be used to read a compiled spir-v file from disk
     :accessor csi-fence)))
 
 (defun make-compute-shader-info ()
-  "Data created by create-compute-shader, opaque outside april-gpu"
+  "Data created by create-compute-pipeline, opaque outside april-gpu,
+but needed for cleanup-compute-pipeline"
   (make-instance 'compute-shader-info))
 
 ;;--------------------------------------------------
