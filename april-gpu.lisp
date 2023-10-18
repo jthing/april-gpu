@@ -149,7 +149,7 @@ vk-utils:read-shader-source can be used to read a compiled spir-v file from disk
    (queue-family-index
     :initform nil
     :accessor csi-queue-family-index)
-   (vk:memory-type-index
+   (memory-type-index
     :initform nil
     :accessor csi-memory-type-index)
    (input-buffer
@@ -454,13 +454,11 @@ but needed for cleanup-compute-pipeline"
 	    :descriptor-type :storage-buffer
 	    :descriptor-count 1
 	    :stage-flags :compute))
-	 (my-descriptor-set-layout-bindings
-	   (list my-descriptor-set-binding1 my-descriptor-set-binding2))
 	 (my-descriptor-set-layout-create-info
 	   (vk:make-descriptor-set-layout-create-info
 	    :flags (vk:make-descriptor-set-layout-binding-flags-create-info
 		    :binding-flags :compute)
-	    :bindings my-descriptor-set-layout-bindings
+	    :bindings (list my-descriptor-set-binding1 my-descriptor-set-binding2)
 	    )))
 
     (multiple-value-bind (my-descriptor-set-layout result)
@@ -523,75 +521,32 @@ but needed for cleanup-compute-pipeline"
     (au:copy-to-device my-device my-c-array my-lisp-array :float))
   (values))
 
+(defmacro do-allocate-buffer-memory (shader-info buffer buffer-memory)
+  `(let* ((my-buffer-memory-requirements
+	    (vk:get-buffer-memory-requirements
+	     (csi-device ,shader-info)
+	     ,buffer))
+	  (my-buffer-allocate-info
+	    (vk:make-memory-allocate-info
+	     :allocation-size (vk:size my-buffer-memory-requirements)
+	     :memory-type-index (csi-memory-type-index ,shader-info))))
+
+     (when *debug-pipeline*
+       (print my-buffer-allocate-info)
+       (when *step* (break)))
+
+     (multiple-value-bind (my-buffer-memory status)
+	 (vk:allocate-memory (csi-device ,shader-info) my-buffer-allocate-info)
+
+       (unless (eql status :success)
+	 (error (make-condition 'error-allocate-memory)))
+
+       (setf ,buffer-memory my-buffer-memory))))
+
 (defun do-allocate-memory (shader-info)
-  (let* ((my-in-buffer-memory-requirements
-	   (vk:get-buffer-memory-requirements
-	    (csi-device shader-info)
-	    (csi-input-buffer shader-info)))
-	 (my-out-buffer-memory-requirements
-	   (vk:get-buffer-memory-requirements
-	    (csi-device shader-info)
-	    (csi-output-buffer shader-info)))
-	 (my-in-buffer-allocate-info
-	   (vk:make-memory-allocate-info
-	    :allocation-size (vk:size my-in-buffer-memory-requirements)
-	    :memory-type-index (csi-memory-type-index shader-info)))
-	 (my-out-buffer-allocate-info
-	   (vk:make-memory-allocate-info
-	    :allocation-size (vk:size my-out-buffer-memory-requirements)
-	    :memory-type-index (csi-memory-type-index shader-info))))
-
-    (multiple-value-bind (my-in-buffer-memory in-status)
-	(vk:allocate-memory (csi-device shader-info) my-in-buffer-allocate-info)
-
-      (multiple-value-bind (my-out-buffer-memory out-status)
-	  (vk:allocate-memory (csi-device shader-info) my-out-buffer-allocate-info)
-
-	(when *debug-pipeline*
-	  (print my-in-buffer-allocate-info)
-	  (print my-out-buffer-allocate-info)
-	  (print my-in-buffer-memory)
-	  (print my-out-buffer-memory)
-	  (when *step* (break)))
-
-	(unless (or (eql in-status :success) (eql out-status :success))
-	  (error (make-condition 'error-allocate-memory)))
-
-	(setf (csi-in-buffer-memory shader-info) my-in-buffer-memory)
-        (setf (csi-out-buffer-memory shader-info) my-out-buffer-memory))))
-  (values))
-
-
-(defun do-create-buffers (shader-info compute-pipeline-info)
-  (let ((my-input-buffer-create-info
-	  (vk:make-buffer-create-info
-	   :size (au:buffer-size (cpi-input compute-pipeline-info) :float)
-	   :usage :storage-buffer
-	   :sharing-mode :exclusive
-	   :queue-family-indices (list 1)))
-	(my-output-buffer-create-info
-	  (vk:make-buffer-create-info
-	   :size (au:buffer-size (cpi-output compute-pipeline-info) :float)
-	   :usage :storage-buffer
-	   :sharing-mode :exclusive
-	   :queue-family-indices (list 1))))
-
-    (let ((input-buffer (vk:create-buffer (csi-device shader-info) my-input-buffer-create-info))
-	  (output-buffer (vk:create-buffer (csi-device shader-info) my-output-buffer-create-info)))
-
-      (unless (and input-buffer output-buffer)
-	(error (make-condition 'error-create-buffers)))
-
-      (when *debug-pipeline*
-	(print "Input")
-	(print my-input-buffer-create-info)
-	(print "Output")
-	(print my-output-buffer-create-info)
-	(when *step* (break)))
-
-      (setf (csi-input-buffer shader-info) input-buffer)
-      (setf (csi-output-buffer shader-info) output-buffer)))
-  (values))
+  (declare (ignorable shader-info))
+  (do-allocate-buffer-memory shader-info (csi-input-buffer  shader-info) (csi-in-buffer-memory  shader-info))
+  (do-allocate-buffer-memory shader-info (csi-output-buffer shader-info) (csi-out-buffer-memory shader-info)))
 
 (defun do-query-memory-types (shader-info)
   (let* ((my-device (csi-physical-device shader-info))
@@ -614,22 +569,52 @@ but needed for cleanup-compute-pipeline"
     (setf (csi-memory-type-index shader-info) my-memory-index))
   (values))
 
+(defun do-create-buffers (shader-info compute-pipeline-info)
+  (let ((my-input-buffer-create-info
+	  (vk:make-buffer-create-info
+	   :size (au:buffer-size (cpi-input compute-pipeline-info) :float)
+	   :usage :storage-buffer
+	   :sharing-mode :exclusive
+	   :queue-family-indices (list (csi-queue-family-index shader-info))))
+	(my-output-buffer-create-info
+	  (vk:make-buffer-create-info
+	   :size (au:buffer-size (cpi-output compute-pipeline-info) :float)
+	   :usage :storage-buffer
+	   :sharing-mode :exclusive
+	   :queue-family-indices (list (csi-queue-family-index shader-info)))))
+
+    (let ((my-input-buffer (vk:create-buffer (csi-device shader-info) my-input-buffer-create-info))
+	  (my-output-buffer (vk:create-buffer (csi-device shader-info) my-output-buffer-create-info)))
+
+      (unless (and my-input-buffer my-output-buffer)
+	(error (make-condition 'error-create-buffers)))
+
+      (when *debug-pipeline*
+	(print "Input")
+	(print my-input-buffer-create-info)
+	(print "Output")
+	(print my-output-buffer-create-info)
+	(when *step* (break)))
+
+      (setf (csi-input-buffer shader-info) my-input-buffer)
+      (setf (csi-output-buffer shader-info) my-output-buffer)))
+  (values))
 
 (defun do-create-device (shader-info)
   (let* ((my-device-queue-create-info
 	   (vk:make-device-queue-create-info
-	    :queue-family-index (csi-memory-type-index shader-info)
-	    :queue-priorities 1))
+	    :queue-family-index (csi-queue-family-index shader-info)))
 	 (my-device-create-info
 	   (vk:make-device-create-info
-	    :queue-create-infos (list my-device-queue-create-info))))
+	    :queue-create-infos (list my-device-queue-create-info)
+	    :enabled-layer-names *enabled-layers*)))
     
+    (when *debug-pipeline*
+      (print my-device-create-info)
+      (when *step* (break)))
+
     (multiple-value-bind (my-device result)
 	(vk:create-device (csi-physical-device shader-info) my-device-create-info)
-
-      (when *debug-pipeline*
-	(print my-device-create-info)
-	(when *step* (break)))
 
       (unless (eql result :success)
 	(error (make-condition 'error-create-device)))
@@ -643,13 +628,13 @@ but needed for cleanup-compute-pipeline"
 	    (csi-physical-device shader-info)))
 	 (my-index
 	   (position-if
-	    (lambda (property) (eql (vk:queue-flags property) :compute))
+	    (lambda (property) (member :compute (vk:queue-flags property)))
 	    my-queue-family-properties)))
 
     (when *debug-pipeline*
-	(print my-queue-family-properties)
-	(print my-index)
-	(when *step* (break)))
+      (print my-queue-family-properties)
+      (print my-index)
+      (when *step* (break)))
 
     (setf (csi-queue-family-index shader-info) my-index))
   (values))
