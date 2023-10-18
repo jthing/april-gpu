@@ -365,13 +365,11 @@ but needed for cleanup-compute-pipeline"
 (defun do-create-pipeline (shader-info)
   (let* ((my-pipeline-shader-stage-create-info
 	   (vk:make-pipeline-shader-stage-create-info
-	    :flags 0
 	    :stage :compute
 	    :module (csi-shader-module shader-info)
 	    :name "main"))
 	 (my-compute-pipeline-create-info
 	   (vk:make-compute-pipeline-create-info
-	    :flags 0
 	    :stage my-pipeline-shader-stage-create-info
 	    :layout (csi-pipeline-layout shader-info))))
 
@@ -388,18 +386,23 @@ but needed for cleanup-compute-pipeline"
       (unless (eql result :success)
 	(error (make-condition 'error-pipeline)))
 
-      (setf (csi-compute-pipeline shader-info) my-compute-pipeline)))
+      (setf (csi-compute-pipeline shader-info) (vk:value my-compute-pipeline))))
   (values))
 
 (defun do-pipeline-layout (shader-info)
   (let* ((my-pipeline-layout-create-info
 	   (vk:make-pipeline-layout-create-info
-	    :set-layouts (list (csi-descriptor-set shader-info))))
+	    :set-layouts (list (csi-descriptor-set-layout shader-info))))
 	 (my-pipeline-layout-info
 	   my-pipeline-layout-create-info)
 	 (my-pipeline-cache-create-info
 	   (vk:make-pipeline-cache-create-info)))
     
+    (when *debug-pipeline*
+      (print my-pipeline-layout-create-info)
+      (print my-pipeline-cache-create-info)
+      (when *step* (break)))
+
     (multiple-value-bind (my-pipeline-layout result-layout)
 	(vk:create-pipeline-layout
 	 (csi-device shader-info)
@@ -415,11 +418,6 @@ but needed for cleanup-compute-pipeline"
 
 	(unless (eql result-cache :success)
 	  (error (make-condition 'error-pipeline-cache)))
-
-	(when *debug-pipeline*
-	  (print my-pipeline-layout-create-info)
-	  (print my-pipeline-cache-create-info)
-	  (when *step* (break)))
 
 	(setf (csi-pipeline-cache shader-info) my-pipeline-cache)
 	(setf (csi-pipeline-layout shader-info) my-pipeline-layout))))
@@ -456,8 +454,6 @@ but needed for cleanup-compute-pipeline"
 	    :stage-flags :compute))
 	 (my-descriptor-set-layout-create-info
 	   (vk:make-descriptor-set-layout-create-info
-	    :flags (vk:make-descriptor-set-layout-binding-flags-create-info
-		    :binding-flags :compute)
 	    :bindings (list my-descriptor-set-binding1 my-descriptor-set-binding2)
 	    )))
 
