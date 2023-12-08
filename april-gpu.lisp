@@ -618,29 +618,13 @@ but needed for cleanup-compute-pipeline"
       (setf (csi-device shader-info) my-device)))
   (values))
 
-(defun do-find-queue-family (shader-info)
-  (let* ((my-queue-family-properties
-	   (vk:get-physical-device-queue-family-properties
-	    (csi-physical-device shader-info)))
-	 (my-index
-	   (position-if
-	    (lambda (property) (member :compute (vk:queue-flags property)))
-	    my-queue-family-properties)))
-
-    (when *debug-pipeline*
-      (print my-queue-family-properties)
-      (print my-index)
-      (when *step* (break)))
-
-    (setf (csi-queue-family-index shader-info) my-index))
-  (values))
-
 (defun do-create-physical-device (shader-info)
   (let* ((my-physical-device (first (vk:enumerate-physical-devices (csi-instance shader-info))))
 	 (my-queue-family-properties (vk:get-physical-device-queue-family-properties my-physical-device))
 	 (my-compute-queue-family-index
 	   (position-if (lambda (q)
-			  (member :compute (vk:queue-flags q)))
+			  (and (member :compute (vk:queue-flags q))
+			       (not (member :graphics (vk:queue-flags q)))))
 			my-queue-family-properties))
 	 (my-queue-priority 0.0)
 	 (my-device-queue-create-info (vk:make-device-queue-create-info
@@ -662,6 +646,7 @@ but needed for cleanup-compute-pipeline"
       (unless (eql status :success)
 	(error (make-condition 'error-create-device)))
 
+      (setf (csi-queue-family-index shader-info) my-compute-queue-family-index)
       (setf (csi-physical-device shader-info) my-physical-device)
       (setf (csi-device shader-info) my-device)))
   (values))
@@ -762,7 +747,6 @@ example:
 "
   (do-create-instance shader-info)
   (do-create-physical-device shader-info)
-  (do-find-queue-family shader-info)
   (do-create-device shader-info)
   (do-create-buffers shader-info compute-pipeline-info)
   (do-query-memory-types shader-info)
